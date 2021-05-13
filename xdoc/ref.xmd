@@ -1,0 +1,198 @@
+@@topic Reference
+@topic Compiler
+    Whenever the meta processor gets started, it calls the configured compiler to get all predefined macros.
+
+@topic commands
+    @cmd if
+        @syn if ifdef ifndef elif else endif
+        legacy if
+
+    @cmd include
+        A file gets included and legacy mode is activated
+
+    @cmd define
+        Legacy macro definition
+
+
+    @cmd group
+        @syn #group <grp>
+            ...
+            #endgroup
+        @syn #usegroup <grp>
+            ...
+            #endgroup
+        @syn #nogroup
+            ...
+            #endgroup
+        Begins a namespace/group, all declared identifiers start with `grp`. It also activates
+        the group on the inside.
+        Note that `grp` can be empty, then it works as scope barriers. No definition will escape
+        the scope. Under the hood, a unique group name is generated, this is called an unnamed group.
+
+        `#usegroup` will also activate the group in the parent group.
+
+        `#nogroup` will generate the introduced names as they appear without any prefix.
+        
+        Note that nested groups are possible, the names are created from the outside to the inside.
+
+    @cmd use
+        @syn #use <grp>
+        Activates the group `grp`. When a name gets looked up, it gets replaced by the same name but starting with `grp`.
+
+        See name lookup
+
+    @cmd def
+        @syn #[use]def <signature>
+            ...
+            #enddef
+
+        @syn #[use]def <signature> = ...;
+
+        New macro definition, it will create an unnamed group on the inside.
+        The unnamed group is activated if `use` is in the command.
+
+    @cmd global
+        @syn #global[by <key>]
+            ...
+            #endglobal
+    
+        Allows to embed definitions anywhere in the code, they will be moved to the root level directly before.
+        It will create an unnamed group on the inside. The group will also be active after `#endglobal`.
+
+        If `key` and the contents are repeated, the repetitions are merged
+
+    @cmd return
+        @syn #return ...
+        
+        In a macro replacement, this will let the rest of the macro expand before the enclosing statement.
+        The expression after `#return` is embedded where the macro call was. Names are looked up before
+        embedded into the target code.
+
+    @cmd import
+        @syn #import <filename or module>[{<arguments...>}] [as <group>]
+
+        Import a file, a JSON like object after the filename to configure arguments.
+        The file will only be included once.
+        No macros or other declarations will be visible in the imported file.
+        If the file accepts arguments, only includes with the same parameters are
+        merged. If the parameters are not empty
+
+
+
+
+    @topic Name Lookup
+        Names are looked up from inside to the outside and from the current line upwards.
+
+
+
+    @topic Examples
+        # Parametric inclusion
+        **`debug.hm`**
+        ```
+        #def ASSERT(cond)
+            #if DEBUG
+                if(cond)
+                {
+                    printf("Assertion error: %s\n", #"cond");
+                }            
+            #endif
+        #enddef
+        ```
+
+        **`test.cm`**
+        ```
+        #import "debug.hm" { DEBUG = true } as DEBUG::
+        #import "debug.hm" { DEBUG = false } as NODEBUG::
+        // alternatively
+        #use DEBUG:: = #import "debug.hm" { DEBUG = true }
+
+        int main()
+        {
+            DEBUG::ASSERT(false); // prints error
+            NODEBUG::ASSERT(false); // does nothing
+        }
+        ```
+
+
+        # Template Types
+        ```
+        #def VEC3<type TYPE>
+            #globalby TYPE
+                typedef struct {
+                    TYPE x, y, z;
+                } vec3;
+            #endglobal
+            #return array
+        #enddef
+
+        int main()
+        {
+            VEC3<int> pos1 = { 1, 2, 3 };
+            VEC3<int> pos2 = pos1; // same type, because of globalby
+        }
+
+        ```
+
+        # Include
+        ```
+        #include <stdio.h> as IO::
+        #include <stddef.h> as DEF$
+        #include <stdlib.h> as LIB.
+
+        int main()
+        {
+            IO::FILE* file = IO::NULL;
+            if(file == DEF$NULL)
+                IO::printf("file is NULL\n");
+
+            return LIB.EXIT_SUCCESS;
+        }
+        ```
+
+        # Modules
+        **`algo.hm`**
+        ```
+        #param MALLOC
+        #param FREE = void #(void* p) {}
+
+        void do_sth()
+        {
+            void* buf = MALLOC(100);
+            if(!buf) return;
+            // ...
+            FREE(buf);
+        }
+        ```
+
+        **`main.hm`**
+        ```
+        #include <stdlib.h> as STD::
+        #include <stdio.h> as STD:: // ok: merged with previous
+        #def algo = "algo.hm" {
+            MALLOC = STD::malloc,
+            FREE = STD::free
+        }
+
+        #import algo as normal_algo::
+
+        void* noisy_malloc(STD::size_t size)
+        {
+            STD::printf("allocating %zu bytes", size);
+            return STD::malloc(size);
+        }
+
+
+        #import algo { MALLOC = noisy_malloc } as noisy_algo::
+
+        int main()
+        {
+            STD::printf("normal");
+            normal_algo::do_sth();
+
+            STD::printf("noisy");
+            noisy_algo::do_sth();
+        }
+        ```
+
+        Note that here multiple `{}` are written after each other.
+        Those get merged like strings, when they appear after each other.
